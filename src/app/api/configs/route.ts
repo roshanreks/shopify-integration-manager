@@ -1,19 +1,22 @@
 export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { encrypt } from "@/lib/encryption";
+import { getShopFromRequest, validateShopifySession } from "@/lib/shopify-session";
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const shop = await getShopFromRequest(req);
+  if (!shop) {
+    return NextResponse.json({ error: "Missing shop parameter" }, { status: 401 });
+  }
+
+  const session = await validateShopifySession(shop);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
   const body = await req.json();
-
   const {
     name,
     clientId,
@@ -32,7 +35,7 @@ export async function POST(req: NextRequest) {
   }
 
   const client = await prisma.client.findFirst({
-    where: { id: clientId, createdBy: userId },
+    where: { id: clientId },
   });
 
   if (!client) {
@@ -42,7 +45,6 @@ export async function POST(req: NextRequest) {
   const data: {
     name: string;
     clientId: string;
-    createdBy: string;
     scopes: string[];
     apiType: string;
     oauthFlow: string;
@@ -51,7 +53,6 @@ export async function POST(req: NextRequest) {
   } = {
     name,
     clientId,
-    createdBy: userId,
     scopes,
     apiType,
     oauthFlow,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useSession, signOut } from "next-auth/react";
+import { useShopify } from "@/lib/shopify-context";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
 import Link from "next/link";
@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
   Store,
-  Settings,
   KeyRound,
   LogOut,
   Shield,
@@ -25,17 +24,17 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { data: session, status } = useSession();
+  const { shop, isLoading } = useShopify();
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    if (status === "unauthenticated") {
-      router.push("/login");
+    if (!isLoading && !shop) {
+      router.push("/install");
     }
-  }, [status, router]);
+  }, [shop, isLoading, router]);
 
-  if (status === "loading") {
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
@@ -43,7 +42,7 @@ export default function DashboardLayout({
     );
   }
 
-  if (!session) return null;
+  if (!shop) return null;
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -54,6 +53,7 @@ export default function DashboardLayout({
             <Shield className="h-6 w-6 text-indigo-600" />
             <span className="font-bold text-lg text-gray-900">Shopify Manager</span>
           </div>
+          <p className="text-xs text-gray-500 mt-1 truncate">{shop}</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-1">
@@ -63,7 +63,7 @@ export default function DashboardLayout({
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={`${item.href}?shop=${encodeURIComponent(shop)}`}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   isActive
                     ? "bg-indigo-50 text-indigo-700"
@@ -78,17 +78,15 @@ export default function DashboardLayout({
         </nav>
 
         <div className="p-4 border-t border-gray-200">
-          <div className="mb-4 px-3">
-            <p className="text-sm font-medium text-gray-900">{session.user?.name || session.user?.email}</p>
-            <p className="text-xs text-gray-500">{session.user?.email}</p>
-          </div>
           <Button
             variant="outline"
             className="w-full justify-start gap-2"
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={() => {
+              window.location.href = "/install";
+            }}
           >
             <LogOut className="h-4 w-4" />
-            Sign Out
+            Switch Store
           </Button>
         </div>
       </aside>

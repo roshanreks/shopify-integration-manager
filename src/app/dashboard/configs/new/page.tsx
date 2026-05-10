@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,8 +18,9 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AlertTriangle, Check, ChevronDown, ChevronUp, KeyRound } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, KeyRound } from "lucide-react";
 import toast from "react-hot-toast";
+import { useShopify } from "@/lib/shopify-context";
 
 interface ScopeItem {
   label: string;
@@ -41,6 +42,7 @@ interface Client {
 export default function NewConfigPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { shop } = useShopify();
   const preselectedClientId = searchParams.get("clientId");
 
   const [clients, setClients] = useState<Client[]>([]);
@@ -58,15 +60,15 @@ export default function NewConfigPage() {
   const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
+    if (!shop) return;
     Promise.all([
-      fetch("/api/clients").then((r) => r.json()),
-      fetch("/api/scopes").then((r) => r.json()),
+      fetch(`/api/clients?shop=${encodeURIComponent(shop)}`).then((r) => r.json()),
+      fetch(`/api/scopes?shop=${encodeURIComponent(shop)}`).then((r) => r.json()),
     ])
       .then(([clientsData, scopesData]) => {
         setClients(clientsData);
         setScopeGroups(scopesData.groups);
         setPresets(scopesData.presets);
-        // Expand first group by default
         if (scopesData.groups.length > 0) {
           setExpandedGroups({ [scopesData.groups[0].title]: true });
         }
@@ -76,7 +78,7 @@ export default function NewConfigPage() {
         toast.error("Failed to load data");
         setInitialLoading(false);
       });
-  }, []);
+  }, [shop]);
 
   const toggleScope = (value: string) => {
     setSelectedScopes((prev) =>
@@ -130,7 +132,7 @@ export default function NewConfigPage() {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/configs", {
+      const res = await fetch(`/api/configs?shop=${encodeURIComponent(shop || "")}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -147,7 +149,7 @@ export default function NewConfigPage() {
       if (res.ok) {
         const data = await res.json();
         toast.success("Configuration created");
-        router.push(`/dashboard/configs/${data.id}`);
+        router.push(`/dashboard/configs/${data.id}?shop=${encodeURIComponent(shop || "")}`);
       } else {
         const data = await res.json();
         toast.error(data.error || "Failed to create config");
@@ -177,7 +179,6 @@ export default function NewConfigPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Basic Info */}
         <Card>
           <CardHeader>
             <CardTitle>Basic Information</CardTitle>
@@ -263,7 +264,6 @@ export default function NewConfigPage() {
           </CardContent>
         </Card>
 
-        {/* Scope Presets */}
         <Card>
           <CardHeader>
             <CardTitle>Recommended Presets</CardTitle>
@@ -285,7 +285,6 @@ export default function NewConfigPage() {
           </CardContent>
         </Card>
 
-        {/* Scope Selection */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -407,7 +406,7 @@ export default function NewConfigPage() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => router.push("/dashboard")}
+            onClick={() => router.push(`/dashboard?shop=${encodeURIComponent(shop || "")}`)}
           >
             Cancel
           </Button>

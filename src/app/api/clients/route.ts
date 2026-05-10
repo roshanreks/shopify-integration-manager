@@ -1,19 +1,21 @@
 export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getShopFromRequest, validateShopifySession } from "@/lib/shopify-session";
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const shop = await getShopFromRequest(req);
+  if (!shop) {
+    return NextResponse.json({ error: "Missing shop parameter" }, { status: 401 });
+  }
+
+  const session = await validateShopifySession(shop);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
-
   const clients = await prisma.client.findMany({
-    where: { createdBy: userId },
     include: {
       apiConfigs: {
         include: {
@@ -31,21 +33,23 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const shop = await getShopFromRequest(req);
+  if (!shop) {
+    return NextResponse.json({ error: "Missing shop parameter" }, { status: 401 });
+  }
+
+  const session = await validateShopifySession(shop);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
   const body = await req.json();
-
   const { name, storeUrl, storeName, contactEmail } = body;
 
   if (!name || !storeUrl) {
     return NextResponse.json({ error: "Name and store URL are required" }, { status: 400 });
   }
 
-  // Normalize store URL
   let normalizedUrl = storeUrl.trim().toLowerCase();
   normalizedUrl = normalizedUrl.replace(/^https?:\/\//, "").replace(/\/+$/, "");
   if (!normalizedUrl.includes(".")) {
@@ -58,7 +62,6 @@ export async function POST(req: NextRequest) {
       storeUrl: normalizedUrl,
       storeName: storeName || name,
       contactEmail,
-      createdBy: userId,
     },
   });
 

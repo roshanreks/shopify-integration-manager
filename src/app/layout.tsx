@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "react-hot-toast";
-import { Providers } from "@/components/providers";
+import { ShopifyProvider } from "@/lib/shopify-context";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -19,10 +19,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <Providers>
+        <ShopifyProvider>
           {children}
           <Toaster position="top-right" />
-        </Providers>
+        </ShopifyProvider>
       </body>
     </html>
   );

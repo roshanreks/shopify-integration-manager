@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
+import { useShopify } from "@/lib/shopify-context";
 
 interface ConfigDetail {
   id: string;
@@ -64,6 +65,7 @@ export default function ConfigDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { shop } = useShopify();
   const configId = params.id as string;
   const oauthSuccess = searchParams.get("oauth") === "success";
 
@@ -72,7 +74,8 @@ export default function ConfigDetailPage() {
   const [oauthLoading, setOauthLoading] = useState(false);
 
   const fetchConfig = () => {
-    fetch(`/api/configs/${configId}`)
+    if (!shop) return;
+    fetch(`/api/configs/${configId}?shop=${encodeURIComponent(shop)}`)
       .then((res) => res.json())
       .then((data) => {
         setConfig(data);
@@ -86,7 +89,7 @@ export default function ConfigDetailPage() {
 
   useEffect(() => {
     fetchConfig();
-  }, [configId]);
+  }, [configId, shop]);
 
   useEffect(() => {
     if (oauthSuccess) {
@@ -100,11 +103,11 @@ export default function ConfigDetailPage() {
   };
 
   const startOAuth = async () => {
-    if (!config) return;
+    if (!config || !shop) return;
     setOauthLoading(true);
 
     try {
-      const res = await fetch("/api/shopify/oauth/start", {
+      const res = await fetch(`/api/shopify/oauth/start?shop=${encodeURIComponent(shop)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -128,7 +131,7 @@ export default function ConfigDetailPage() {
 
   const refreshToken = async () => {
     try {
-      const res = await fetch(`/api/configs/${configId}/token/refresh`, {
+      const res = await fetch(`/api/configs/${configId}/token/refresh?shop=${encodeURIComponent(shop || "")}`, {
         method: "POST",
       });
 
@@ -148,7 +151,7 @@ export default function ConfigDetailPage() {
     if (!confirm("Are you sure you want to revoke this token?")) return;
 
     try {
-      const res = await fetch(`/api/configs/${configId}/token`, {
+      const res = await fetch(`/api/configs/${configId}/token?shop=${encodeURIComponent(shop || "")}`, {
         method: "DELETE",
       });
 
@@ -167,13 +170,13 @@ export default function ConfigDetailPage() {
     if (!confirm("Are you sure you want to delete this configuration?")) return;
 
     try {
-      const res = await fetch(`/api/configs/${configId}`, {
+      const res = await fetch(`/api/configs/${configId}?shop=${encodeURIComponent(shop || "")}`, {
         method: "DELETE",
       });
 
       if (res.ok) {
         toast.success("Configuration deleted");
-        router.push("/dashboard");
+        router.push(`/dashboard?shop=${encodeURIComponent(shop || "")}`);
       } else {
         toast.error("Failed to delete configuration");
       }
@@ -247,7 +250,7 @@ export default function ConfigDetailPage() {
       <div className="text-center py-12">
         <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-gray-300" />
         <p className="text-lg font-medium">Configuration not found</p>
-        <Link href="/dashboard">
+        <Link href={`/dashboard?shop=${encodeURIComponent(shop || "")}`}>
           <Button className="mt-4" variant="outline">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Dashboard
@@ -261,7 +264,7 @@ export default function ConfigDetailPage() {
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/dashboard">
+          <Link href={`/dashboard?shop=${encodeURIComponent(shop || "")}`}>
             <Button variant="outline" size="sm">
               <ArrowLeft className="h-4 w-4 mr-1" />
               Back
@@ -339,7 +342,7 @@ export default function ConfigDetailPage() {
               {!config.installGuide && (
                 <Button
                   onClick={async () => {
-                    const res = await fetch(`/api/configs/${configId}/guide`, {
+                    const res = await fetch(`/api/configs/${configId}/guide?shop=${encodeURIComponent(shop || "")}`, {
                       method: "POST",
                     });
                     if (res.ok) {

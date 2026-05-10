@@ -1,13 +1,18 @@
 export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { encrypt, decrypt } from "@/lib/encryption";
+import { encrypt } from "@/lib/encryption";
+import { getShopFromRequest, validateShopifySession } from "@/lib/shopify-session";
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const shop = await getShopFromRequest(req);
+  if (!shop) {
+    return NextResponse.json({ error: "Missing shop parameter" }, { status: 401 });
+  }
+
+  const session = await validateShopifySession(shop);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -21,23 +26,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const userId = (session.user as { id: string }).id;
-
   const config = await prisma.apiConfig.findFirst({
-    where: { id: configId, createdBy: userId },
+    where: { id: configId },
   });
 
   if (!config) {
     return NextResponse.json({ error: "Config not found" }, { status: 404 });
   }
 
-  // Deactivate existing tokens
   await prisma.token.updateMany({
     where: { configId },
     data: { isActive: false },
   });
 
-  // Store new token
   const encryptedToken = encrypt(accessToken);
 
   const token = await prisma.token.create({
@@ -50,7 +51,6 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Update config status
   await prisma.apiConfig.update({
     where: { id: configId },
     data: { status: "active" },

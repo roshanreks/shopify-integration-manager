@@ -1,21 +1,25 @@
 export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { encrypt } from "@/lib/encryption";
+import { getShopFromRequest, validateShopifySession } from "@/lib/shopify-session";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const shop = await getShopFromRequest(req);
+  if (!shop) {
+    return NextResponse.json({ error: "Missing shop parameter" }, { status: 401 });
+  }
+
+  const session = await validateShopifySession(shop);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
-  const userId = (session.user as { id: string }).id;
 
   const config = await prisma.apiConfig.findFirst({
-    where: { id, createdBy: userId },
+    where: { id },
     include: {
       client: true,
       tokens: {
@@ -23,6 +27,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     },
   });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const configAny = config as any;
 
   if (!config) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -32,17 +39,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const shop = await getShopFromRequest(req);
+  if (!shop) {
+    return NextResponse.json({ error: "Missing shop parameter" }, { status: 401 });
+  }
+
+  const session = await validateShopifySession(shop);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
-  const userId = (session.user as { id: string }).id;
   const body = await req.json();
 
   const existing = await prisma.apiConfig.findFirst({
-    where: { id, createdBy: userId },
+    where: { id },
   });
 
   if (!existing) {
@@ -70,16 +81,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const shop = await getShopFromRequest(req);
+  if (!shop) {
+    return NextResponse.json({ error: "Missing shop parameter" }, { status: 401 });
+  }
+
+  const session = await validateShopifySession(shop);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
-  const userId = (session.user as { id: string }).id;
 
   const existing = await prisma.apiConfig.findFirst({
-    where: { id, createdBy: userId },
+    where: { id },
   });
 
   if (!existing) {

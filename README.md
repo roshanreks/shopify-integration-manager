@@ -1,158 +1,188 @@
 # Shopify Integration Manager
 
-An internal agency tool to manage Shopify API connections for multiple client stores.
+A **Shopify Embedded App** that helps agencies and developers manage API configurations, OAuth scopes, and access tokens for multiple Shopify client stores.
 
-## Overview
+## What It Does
 
-Since January 1, 2026, Shopify no longer allows creating Custom Apps from the store admin. All apps must be created through the [Shopify Partners Dev Dashboard](https://partners.shopify.com). This tool helps you:
+When installed on a Shopify store, this app:
 
-- **Calculate required OAuth scopes** based on use case
-- **Generate step-by-step Dev Dashboard configuration guides**
-- **Manage OAuth flows** (Authorization Code + Client Credentials)
-- **Securely store access tokens** in an encrypted vault
-- **Monitor multi-client dashboard** with token health alerts
+1. **Automatically receives an access token** from Shopify via OAuth
+2. **Calculates required OAuth scopes** for any integration (60+ scopes organized by category)
+3. **Generates step-by-step Dev Dashboard setup guides** for client stores
+4. **Manages external OAuth flows** for other stores (Authorization Code + Client Credentials)
+5. **Securely stores tokens** with AES-256-GCM encryption
+6. **Monitors token health** with expiry alerts
+
+## Who It's For
+
+- Agencies managing 5–50+ Shopify clients
+- Freelancers tired of manually configuring Custom Apps in the Dev Dashboard
+- Developers who need a central place to track scopes, tokens, and API configs
 
 ## Tech Stack
 
-- Next.js 14 (App Router) + TypeScript
-- Tailwind CSS + shadcn/ui
-- Prisma ORM + PostgreSQL
-- NextAuth.js (Credentials provider)
-- AES-256-GCM encryption for tokens
+- **Next.js 14** (App Router) + TypeScript
+- **Tailwind CSS** + shadcn/ui
+- **Prisma ORM** + PostgreSQL
+- **Shopify OAuth** (no NextAuth — Shopify handles login)
+- **AES-256-GCM** token encryption
 
-## Prerequisites
+## Architecture
+
+```
+┌─────────────────────────────────────┐
+│         Shopify Admin               │
+│  ┌─────────────────────────────┐    │
+│  │   Embedded App (iframe)     │    │
+│  │  - Dashboard                │    │
+│  │  - Scope Calculator         │    │
+│  │  - Token Vault              │    │
+│  └─────────────────────────────┘    │
+└─────────────────────────────────────┘
+           │
+           ▼ Shopify OAuth
+┌─────────────────────────────────────┐
+│      Your Next.js App               │
+│  - /api/auth         (OAuth start)  │
+│  - /api/auth/callback (get token)   │
+│  - /api/clients      (CRUD)         │
+│  - /api/configs      (CRUD)         │
+│  - /api/shopify/*    (OAuth flows)  │
+└─────────────────────────────────────┘
+           │
+           ▼ Encrypted
+┌─────────────────────────────────────┐
+│      PostgreSQL Database            │
+│  - ShopifySession (app token)       │
+│  - Client (your client stores)      │
+│  - ApiConfig (scope selections)     │
+│  - Token (encrypted access tokens)  │
+└─────────────────────────────────────┘
+```
+
+## Quick Start
+
+### Prerequisites
 
 - Node.js 18+
-- PostgreSQL database
-- Shopify Partners account (for Dev Dashboard)
-
-## Setup
+- PostgreSQL database (or Supabase free tier)
+- Shopify Partners account (free)
 
 ### 1. Clone and Install
 
 ```bash
-git clone <repo>
 cd shopify-integration-manager
 npm install
 ```
 
-### 2. Configure Environment Variables
+### 2. Environment Variables
 
-Create a `.env` file (or edit the existing one):
+Copy `.env.example` to `.env` and fill in:
 
 ```env
-DATABASE_URL="postgresql://user:password@localhost:5432/shopify_integration_manager?schema=public"
-NEXTAUTH_SECRET="your-random-secret-key"
-NEXTAUTH_URL="http://localhost:3000"
-SHOPIFY_CLIENT_ID="your-shopify-client-id"
-SHOPIFY_CLIENT_SECRET="your-shopify-client-secret"
-ENCRYPTION_KEY="your-32-byte-hex-key"
+SHOPIFY_API_KEY="your-shopify-app-client-id"
+SHOPIFY_API_SECRET="your-shopify-app-client-secret"
+SCOPES="read_products,read_orders,read_customers,read_inventory"
+DATABASE_URL="postgresql://..."
 HOST="http://localhost:3000"
+ENCRYPTION_KEY="64-char-hex-string"
 ```
 
-**Generate a secure encryption key:**
+Generate encryption key:
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-### 3. Set Up Database
+### 3. Database Setup
 
 ```bash
 npx prisma migrate dev --name init
 npx prisma generate
 ```
 
-### 4. Seed Admin User
-
-```bash
-npx tsx prisma/seed.ts
-```
-
-Default login:
-- Email: `admin@shopify-manager.com`
-- Password: `admin123`
-
-### 5. Run Development Server
+### 4. Run Locally
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+### 5. Install on a Development Store
 
-## How to Create a Shopify App in Dev Dashboard
+1. Create a Shopify app in [Partners Dashboard](https://partners.shopify.com)
+2. Set App URL to `http://localhost:3000`
+3. Set redirect URL to `http://localhost:3000/api/auth/callback`
+4. Copy Client ID/Secret to `.env`
+5. In Partners Dashboard, click "Select store" → "Install on development store"
+6. Approve scopes → app opens embedded in Shopify Admin
 
-1. Go to [partners.shopify.com](https://partners.shopify.com) and log in
-2. Click **Apps** → **Create app** → **"Create app manually"**
-3. Give your app a name (e.g., "Acme Product Sync")
-4. Go to **Configuration**:
-   - Set **App URL** to your integration manager URL
-   - Add **Allowed redirection URL**: `http://localhost:3000/api/shopify/callback`
-5. Go to **API Access** → **Configure Admin API integration**
-6. Enable the scopes your integration needs
-7. Save and install the app on your client's store
-8. Reveal the Admin API access token **ONCE** (you cannot see it again)
-9. Use the OAuth flow in this dashboard, or paste the token manually
+## Deployment
 
-## Features
+See [DEPLOY.md](./DEPLOY.md) for full Vercel + Supabase deployment guide.
+
+## Key Features
 
 ### Scope Calculator
-- 60+ Shopify Admin API scopes organized by business function
+- 60+ Shopify Admin API scopes
+- Organized by business function (Products, Orders, Customers, etc.)
 - "Select All Read/Write" per category
 - Recommended presets: Product Sync, Order Manager, Analytics Only, Full Access, Read-Only
 
 ### Dev Dashboard Config Generator
 - Step-by-step copy-paste instructions
 - Exact OAuth authorization URL
-- Warnings for sensitive scopes (read_all_orders, write_, gift_cards, users)
-
-### OAuth Flow Handler
-- Authorization Code flow (for client stores)
-- Client Credentials flow (machine-to-machine, 24h expiry)
-- CSRF protection with state parameter
-- Automatic token storage with encryption
+- Warnings for sensitive scopes (`read_all_orders`, `write_`, `gift_cards`)
 
 ### Token Vault
 - AES-256-GCM encryption
 - Token expiry tracking
-- Auto-refresh for Client Credentials tokens
+- Auto-refresh for Client Credentials flow
 - Revocation support
 
-### Multi-Store Dashboard
+### Multi-Client Dashboard
 - All clients in one view
-- Color-coded token health: Green (active), Yellow (expires <24h), Red (expired)
-- Quick actions for each store
+- Color-coded token health (Green/Yellow/Red)
+- Quick actions per store
 
-## API Endpoints
+## API Routes
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | /api/clients | Create client |
-| GET | /api/clients | List clients |
-| GET | /api/clients/:id | Get client details |
-| POST | /api/configs | Create API config |
-| GET | /api/configs/:id | Get config details |
-| PUT | /api/configs/:id | Update config |
-| DELETE | /api/configs/:id | Delete config |
-| POST | /api/configs/:id/guide | Generate setup guide |
-| GET | /api/configs/:id/guide | Retrieve guide |
-| POST | /api/shopify/oauth/start | Start OAuth flow |
-| GET | /api/shopify/callback | OAuth callback |
-| POST | /api/shopify/token | Store token manually |
-| POST | /api/shopify/client-credentials | M2M token fetch |
-| GET | /api/configs/:id/token | Get token metadata |
-| POST | /api/configs/:id/token/refresh | Refresh token |
-| DELETE | /api/configs/:id/token | Revoke token |
-| GET | /api/scopes | List all scopes |
-| POST | /api/scopes/calculate | Get recommended scopes |
+| GET | `/api/auth?shop=xxx` | Start Shopify OAuth install |
+| GET | `/api/auth/callback` | Receive token from Shopify |
+| GET/POST | `/api/clients` | List / create clients |
+| GET/DELETE | `/api/clients/:id` | Get / delete client |
+| POST | `/api/configs` | Create API config |
+| GET/PUT/DELETE | `/api/configs/:id` | Manage config |
+| POST/GET | `/api/configs/:id/guide` | Generate/retrieve setup guide |
+| POST | `/api/shopify/oauth/start` | Start external OAuth |
+| GET | `/api/shopify/callback` | External OAuth callback |
+| POST | `/api/shopify/token` | Store token manually |
+| POST | `/api/shopify/client-credentials` | Machine-to-machine token |
+| GET | `/api/scopes` | List all scopes |
+| POST | `/api/scopes/calculate` | Get recommended scopes |
 
-## Security Notes
+## How Shopify Auth Works (No Login Page)
 
-- **NEVER** commit `.env` to version control
-- **NEVER** expose `client_secret` or `access_token` in the frontend
-- Tokens are encrypted with AES-256-GCM before database storage
-- OAuth state parameter is validated and expires after 10 minutes
-- All API routes require authentication
+Unlike a regular web app, this uses **Shopify's OAuth**:
+
+1. Merchant clicks "Install" in Shopify Admin
+2. Shopify redirects to `/api/auth?shop=mystore.myshopify.com`
+3. Your app redirects to Shopify's OAuth approval page
+4. Merchant approves the scopes
+5. Shopify redirects to `/api/auth/callback?code=...`
+6. Your app exchanges the code for an **access token**
+7. Token is stored encrypted in the database
+8. Merchant sees your app embedded in their Shopify Admin
+
+**No username. No password. No NextAuth.** Shopify handles everything.
+
+## Security
+
+- Tokens encrypted with AES-256-GCM before database storage
+- `ENCRYPTION_KEY` never leaves the server
+- Shopify session validation on every API request
+- CSRF protection via state parameter in OAuth flow
+- Never expose access tokens in frontend UI
 
 ## License
 

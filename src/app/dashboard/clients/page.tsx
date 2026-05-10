@@ -25,6 +25,7 @@ import {
 import { Plus, Store, Trash2, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import toast from "react-hot-toast";
+import { useShopify } from "@/lib/shopify-context";
 
 interface Client {
   id: string;
@@ -36,6 +37,7 @@ interface Client {
 }
 
 export default function ClientsPage() {
+  const { shop } = useShopify();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -47,7 +49,8 @@ export default function ClientsPage() {
   });
 
   const fetchClients = () => {
-    fetch("/api/clients")
+    if (!shop) return;
+    fetch(`/api/clients?shop=${encodeURIComponent(shop)}`)
       .then((res) => res.json())
       .then((data) => {
         setClients(data);
@@ -58,12 +61,12 @@ export default function ClientsPage() {
 
   useEffect(() => {
     fetchClients();
-  }, []);
+  }, [shop]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch("/api/clients", {
+      const res = await fetch(`/api/clients?shop=${encodeURIComponent(shop || "")}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
@@ -87,7 +90,7 @@ export default function ClientsPage() {
     if (!confirm("Are you sure you want to delete this client? All configs will be deleted too.")) return;
 
     try {
-      const res = await fetch(`/api/clients/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/clients/${id}?shop=${encodeURIComponent(shop || "")}`, { method: "DELETE" });
       if (res.ok) {
         toast.success("Client deleted");
         fetchClients();
@@ -223,7 +226,7 @@ export default function ClientsPage() {
                     <TableCell>{client.apiConfigs?.length || 0}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <Link href={`/dashboard/configs/new?clientId=${client.id}`}>
+                        <Link href={`/dashboard/configs/new?shop=${encodeURIComponent(shop || "")}&clientId=${client.id}`}>
                           <Button variant="ghost" size="sm">
                             New Config
                           </Button>

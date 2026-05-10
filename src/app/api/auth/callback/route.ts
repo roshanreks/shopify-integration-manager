@@ -1,8 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { encrypt } from "@/lib/encryption";
+import { getShopifyConfig, getHost } from "@/lib/shopify";
+import { loadSession, storeSession, deleteSession } from "@/lib/session-storage";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -19,29 +19,34 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (!code || !state || !shop) {
+  if (!code || !shop || !state) {
     return NextResponse.json({ error: "Missing required parameters" }, { status: 400 });
   }
 
-  // Note: In a full implementation, you'd validate the state against a stored OAuthState
-  // For now, we proceed with the token exchange
+  const cleanShop = shop.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 
-  const clientId = process.env.SHOPIFY_CLIENT_ID || process.env.SHOPIFY_API_KEY;
-  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET || process.env.SHOPIFY_API_SECRET;
-
-  if (!clientId || !clientSecret) {
-    return NextResponse.json({ error: "Shopify credentials not configured" }, { status: 500 });
+  // Validate state
+  const stateSession = await loadSession(state);
+  if (!stateSession || stateSession.state !== state) {
+    return NextResponse.json({ error: "Invalid state parameter" }, { status: 400 });
   }
 
+  // Clean up state session
+  await deleteSession(state);
+
   try {
+    const shopify = getShopifyConfig();
+    const host = getHost();
+
+    // Exchange code for access token
     const tokenResponse = await fetch(
-      `https://${shop}/admin/oauth/access_token`,
+      `https://${cleanShop}/admin/oauth/access_token`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          client_id: clientId,
-          client_secret: clientSecret,
+          client_id: shopify.apiKey,
+          client_secret: shopify.apiSecretKey,
           code,
         }),
       }
@@ -57,19 +62,22 @@ export async function GET(req: NextRequest) {
 
     const tokenData = await tokenResponse.json();
     const { access_token, scope } = tokenData;
-    const grantedScopes = scope ? scope.split(",") : [];
 
-    // For this external OAuth callback, we'll store the token but need a configId
-    // In a real flow, the state would contain the configId
-    // For now, we just return the token info and let the frontend handle storage
-    const host = process.env.HOST || "http://localhost:3000";
+    // Store the session
+    const sessionId = `${cleanShop}_offline`;
+    await storeSession({
+      id: sessionId,
+      shop: cleanShop,
+      isOnline: false,
+      scope,
+      accessToken: access_token,
+    });
 
-    // If we can't determine the config, redirect to dashboard with token info
-    return NextResponse.redirect(
-      `${host}/dashboard?shop=${encodeURIComponent(shop)}&oauth=success&token_stored=true`
-    );
+    // Redirect to the embedded app
+    const redirectUrl = `${host}/dashboard?shop=${encodeURIComponent(cleanShop)}`;
+    return NextResponse.redirect(redirectUrl);
   } catch (err) {
-    console.error("OAuth callback error:", err);
+    console.error("Callback error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

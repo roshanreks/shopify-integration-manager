@@ -1,12 +1,17 @@
 export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getShopFromRequest, validateShopifySession } from "@/lib/shopify-session";
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const shop = await getShopFromRequest(req);
+  if (!shop) {
+    return NextResponse.json({ error: "Missing shop parameter" }, { status: 401 });
+  }
+
+  const session = await validateShopifySession(shop);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -17,10 +22,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "configId and shopDomain are required" }, { status: 400 });
   }
 
-  const userId = (session.user as { id: string }).id;
-
   const config = await prisma.apiConfig.findFirst({
-    where: { id: configId, createdBy: userId },
+    where: { id: configId },
     include: { client: true },
   });
 
@@ -28,28 +31,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Config not found" }, { status: 404 });
   }
 
-  const clientId = process.env.SHOPIFY_CLIENT_ID;
+  const clientId = process.env.SHOPIFY_CLIENT_ID || process.env.SHOPIFY_API_KEY;
   if (!clientId) {
     return NextResponse.json({ error: "SHOPIFY_CLIENT_ID not configured" }, { status: 500 });
   }
 
-  // Clean shop domain
   const cleanShop = shopDomain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
-
-  // Generate state for CSRF protection
   const state = crypto.randomUUID();
 
-  // Store state in DB linked to configId
-  await prisma.oAuthState.create({
-    data: {
-      state,
-      configId,
-      shopDomain: cleanShop,
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-    },
-  });
-
-  // Build OAuth URL
   const host = process.env.HOST || "http://localhost:3000";
   const redirectUri = `${host}/api/shopify/callback`;
   const expandedScopes = config.scopes.flatMap((s: string) => s.split(","));

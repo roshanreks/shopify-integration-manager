@@ -1,20 +1,23 @@
 "use client";
 
 import { useEffect } from "react";
-import { useSession } from "next-auth/react";
+import { useShopify } from "@/lib/shopify-context";
 import { useRouter } from "next/navigation";
 
 export default function HomePage() {
-  const { status } = useSession();
+  const { shop, isLoading } = useShopify();
   const router = useRouter();
 
   useEffect(() => {
-    if (status === "authenticated") {
-      router.push("/dashboard");
-    } else if (status === "unauthenticated") {
-      router.push("/login");
+    if (isLoading) return;
+
+    if (shop) {
+      router.push(`/dashboard?shop=${encodeURIComponent(shop)}`);
+    } else {
+      // Not in Shopify context, show install instructions
+      router.push("/install");
     }
-  }, [status, router]);
+  }, [shop, isLoading, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center">

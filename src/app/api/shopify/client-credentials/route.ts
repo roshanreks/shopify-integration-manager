@@ -1,13 +1,18 @@
 export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { encrypt, decrypt } from "@/lib/encryption";
+import { getShopFromRequest, validateShopifySession } from "@/lib/shopify-session";
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const shop = await getShopFromRequest(req);
+  if (!shop) {
+    return NextResponse.json({ error: "Missing shop parameter" }, { status: 401 });
+  }
+
+  const session = await validateShopifySession(shop);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -21,17 +26,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const userId = (session.user as { id: string }).id;
-
   const config = await prisma.apiConfig.findFirst({
-    where: { id: configId, createdBy: userId },
+    where: { id: configId },
+    include: { client: true },
   });
 
   if (!config) {
     return NextResponse.json({ error: "Config not found" }, { status: 404 });
   }
 
-  if (!config.shopifyClientId || !config.shopifyClientSecret) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const configAny = config as any;
+  const cfgClientId = configAny.shopifyClientId as string | undefined;
+  const cfgClientSecret = configAny.shopifyClientSecret as string | undefined;
+
+  if (!cfgClientId || !cfgClientSecret) {
     return NextResponse.json(
       { error: "Client ID and secret not configured for this config" },
       { status: 400 }
@@ -41,14 +50,14 @@ export async function POST(req: NextRequest) {
   const cleanShop = shopDomain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 
   try {
-    const clientSecret = decrypt(config.shopifyClientSecret);
+    const clientSecret = decrypt(cfgClientSecret);
 
     const response = await fetch(`https://${cleanShop}/admin/oauth/access_token`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "client_credentials",
-        client_id: config.shopifyClientId,
+        client_id: cfgClientId,
         client_secret: clientSecret,
       }).toString(),
     });
@@ -64,18 +73,15 @@ export async function POST(req: NextRequest) {
     const data = await response.json();
     const { access_token, scope, expires_in } = data;
 
-    // Calculate expiry
     const expiresAt = expires_in
       ? new Date(Date.now() + expires_in * 1000)
-      : new Date(Date.now() + 24 * 60 * 60 * 1000); // Default 24 hours
+      : new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    // Deactivate existing tokens
     await prisma.token.updateMany({
       where: { configId },
       data: { isActive: false },
     });
 
-    // Store encrypted token
     const encryptedToken = encrypt(access_token);
 
     await prisma.token.create({
@@ -90,7 +96,6 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Update config status
     await prisma.apiConfig.update({
       where: { id: configId },
       data: { status: "active" },
