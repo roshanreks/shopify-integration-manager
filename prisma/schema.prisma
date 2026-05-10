@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  name       String?
+  password   String?  // For credentials provider
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  clients    Client[]
+  apiConfigs ApiConfig[]
+
+  @@map("users")
+}
+
+model Client {
+  id           String   @id @default(uuid())
+  name         String
+  storeUrl     String   // mystore.myshopify.com
+  storeName    String?
+  contactEmail String?
+  createdBy    String
+  user         User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  apiConfigs   ApiConfig[]
+
+  @@map("clients")
+  @@index([createdBy])
+}
+
+model ApiConfig {
+  id                  String   @id @default(uuid())
+  name                String   // "Product Sync - Read Only"
+  clientId            String
+  client              Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdBy           String
+  user                User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  // Scopes stored as array
+  scopes              String[]
+
+  // App type
+  apiType             String   @default("admin_graphql") // 'admin_graphql' | 'admin_rest' | 'storefront'
+
+  // OAuth credentials from Dev Dashboard
+  shopifyClientId     String?
+  shopifyClientSecret String?  // Encrypted
+
+  // Flow type
+  oauthFlow           String   @default("authorization_code") // 'authorization_code' | 'client_credentials'
+
+  // Status
+  status              String   @default("pending") // pending | active | expired | revoked
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tokens              Token[]
+  oauthStates         OAuthState[]
+
+  // Install instructions
+  installGuide        Json?    // Generated step-by-step guide
+
+  @@map("api_configs")
+  @@index([clientId])
+  @@index([createdBy])
+}
+
+model Token {
+  id              String    @id @default(uuid())
+  configId        String
+  config          ApiConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  // Encrypted token data
+  accessToken     String    // AES-256 encrypted
+  refreshToken    String?   // AES-256 encrypted
+
+  // Scope granted
+  grantedScopes   String[]
+
+  // Expiry tracking
+  expiresAt       DateTime?
+  isActive        Boolean   @default(true)
+
+  // Metadata
+  shopDomain      String
+  installedAt     DateTime  @default(now())
+  lastUsedAt      DateTime?
+
+  // For client credentials flow (24h expiry)
+  needsRefresh    Boolean   @default(false)
+
+  @@map("tokens")
+  @@index([configId])
+  @@index([isActive])
+}
+
+model OAuthState {
+  id         String   @id @default(uuid())
+  state      String   @unique
+  configId   String
+  config     ApiConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  shopDomain String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@map("oauth_states")
+  @@index([state])
+  @@index([configId])
+}
