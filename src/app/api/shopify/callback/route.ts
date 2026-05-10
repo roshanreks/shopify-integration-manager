@@ -3,6 +3,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { encrypt } from "@/lib/encryption";
 
+/**
+ * Shopify OAuth Callback
+ * 
+ * Handles both:
+ * 1. App installation from Shopify Partners
+ * 2. OAuth token refresh for existing stores
+ */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const code = searchParams.get("code");
@@ -19,17 +26,24 @@ export async function GET(req: NextRequest) {
   }
 
   if (!code || !state || !shop) {
-    return NextResponse.json({ error: "Missing required parameters" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Missing required parameters" },
+      { status: 400 }
+    );
   }
+
+  const cleanShop = shop.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 
   // Validate state
   const oauthState = await prisma.oAuthState.findUnique({
     where: { state },
-    include: { config: true },
   });
 
   if (!oauthState) {
-    return NextResponse.json({ error: "Invalid or expired state" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid or expired state" },
+      { status: 400 }
+    );
   }
 
   if (oauthState.expiresAt < new Date()) {
@@ -45,12 +59,15 @@ export async function GET(req: NextRequest) {
   const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    return NextResponse.json({ error: "Shopify credentials not configured" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Shopify credentials not configured" },
+      { status: 500 }
+    );
   }
 
   try {
     const tokenResponse = await fetch(
-      `https://${shop}/admin/oauth/access_token`,
+      `https://${cleanShop}/admin/oauth/access_token`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -73,33 +90,112 @@ export async function GET(req: NextRequest) {
     const tokenData = await tokenResponse.json();
     const { access_token, scope } = tokenData;
 
-    // Encrypt and store token
     const encryptedToken = encrypt(access_token);
     const grantedScopes = scope ? scope.split(",") : [];
 
-    await prisma.token.create({
-      data: {
-        configId: oauthState.configId,
-        accessToken: encryptedToken,
-        grantedScopes,
-        shopDomain: shop,
-        isActive: true,
-      },
-    });
+    if (oauthState.configId === "install") {
+      // App installation flow - create a default config for this store
+      // First, ensure we have a user record for this shop
+      let user = await prisma.user.findUnique({
+        where: { email: `admin@${cleanShop}` },
+      });
 
-    // Update config status
-    await prisma.apiConfig.update({
-      where: { id: oauthState.configId },
-      data: { status: "active" },
-    });
+      if (!user) {
+        user = await prisma.user.create({
+          data: {
+            id: crypto.randomUUID(),
+            email: `admin@${cleanShop}`,
+            name: cleanShop.replace(".myshopify.com", ""),
+          },
+        });
+      }
 
-    // Redirect to config detail page
-    const host = process.env.HOST || "http://localhost:3000";
-    return NextResponse.redirect(
-      `${host}/dashboard/configs/${oauthState.configId}?oauth=success`
-    );
+      // Create or update client record for this store
+      let clientRecord = await prisma.client.findFirst({
+        where: { storeUrl: cleanShop },
+      });
+
+      if (!clientRecord) {
+        clientRecord = await prisma.client.create({
+          data: {
+            id: crypto.randomUUID(),
+            name: cleanShop.replace(".myshopify.com", ""),
+            storeUrl: cleanShop,
+            storeName: cleanShop.replace(".myshopify.com", ""),
+            contactEmail: `admin@${cleanShop}`,
+            createdBy: user.id,
+          },
+        });
+      }
+
+      // Create default API config for this store
+      let config = await prisma.apiConfig.findFirst({
+        where: { clientId: clientRecord.id },
+      });
+
+      if (!config) {
+        config = await prisma.apiConfig.create({
+          data: {
+            id: crypto.randomUUID(),
+            name: "Store API Access",
+            clientId: clientRecord.id,
+            createdBy: user.id,
+            scopes: grantedScopes,
+            apiType: "admin_graphql",
+            status: "active",
+          },
+        });
+      } else {
+        // Update scopes
+        await prisma.apiConfig.update({
+          where: { id: config.id },
+          data: { scopes: grantedScopes, status: "active" },
+        });
+      }
+
+      // Store the token
+      await prisma.token.create({
+        data: {
+          id: crypto.randomUUID(),
+          configId: config.id,
+          accessToken: encryptedToken,
+          grantedScopes,
+          shopDomain: cleanShop,
+          isActive: true,
+        },
+      });
+
+      // Redirect to embedded app
+      const embeddedUrl = `https://${cleanShop}/admin/apps/${clientId}`;
+      return NextResponse.redirect(embeddedUrl);
+    } else {
+      // Existing config OAuth flow (for additional scopes)
+      await prisma.token.create({
+        data: {
+          id: crypto.randomUUID(),
+          configId: oauthState.configId,
+          accessToken: encryptedToken,
+          grantedScopes,
+          shopDomain: cleanShop,
+          isActive: true,
+        },
+      });
+
+      await prisma.apiConfig.update({
+        where: { id: oauthState.configId },
+        data: { status: "active" },
+      });
+
+      const host = process.env.HOST || "http://localhost:3000";
+      return NextResponse.redirect(
+        `${host}/dashboard/configs/${oauthState.configId}?oauth=success`
+      );
+    }
   } catch (err) {
     console.error("OAuth callback error:", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
